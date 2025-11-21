@@ -8,8 +8,6 @@ import os
 import joblib
 from sklearn.preprocessing import MultiLabelBinarizer
 
-
-
 # ==================================================
 # 1. CONFIGURACIÓN E INICIALIZACIÓN
 # ==================================================
@@ -19,6 +17,10 @@ st.set_page_config(
     page_title="Clasificador Pokémon",
     layout="wide",
 )
+
+# --- GESTIÓN DE RUTAS (SOLUCIÓN AL ERROR) ---
+# Obtenemos la ruta absoluta del directorio donde se encuentra este script (app.py)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- CONSTANTES DE ESTILO Y MODELO ---
 
@@ -38,14 +40,18 @@ POKEMON_TYPE_COLORS = {
 @st.cache_resource
 def load_artifacts():
     try:
-        model = joblib.load("modelo_pokemon_lr.joblib")
-        scaler = joblib.load("scaler_pokemon.joblib")
-        abilities_encoder = joblib.load("abilities_encoder.joblib")
+        # Construimos las rutas completas usando os.path.join
+        model_path = os.path.join(CURRENT_DIR, "modelo_pokemon_lr.joblib")
+        scaler_path = os.path.join(CURRENT_DIR, "scaler_pokemon.joblib")
+        encoder_path = os.path.join(CURRENT_DIR, "abilities_encoder.joblib")
 
+        model = joblib.load(model_path)
+        scaler = joblib.load(scaler_path)
+        abilities_encoder = joblib.load(encoder_path)
 
         return model, scaler, abilities_encoder
     except Exception as e:
-        st.error(f"Error cargando archivos del modelo: {e}")
+        st.error(f"Error cargando archivos del modelo. Verifica que los archivos .joblib estén en GitHub en la misma carpeta que app.py. Detalle: {e}")
         return None, None, None
 
 MODEL, SCALER, ABILITIES_ENCODER = load_artifacts()
@@ -55,10 +61,14 @@ MLB = ABILITIES_ENCODER
 @st.cache_resource
 def load_abilities():
     try:
+        # Si ABILITIES_ENCODER es None (falló la carga anterior), esto daría error, 
+        # así que verificamos antes.
+        if ABILITIES_ENCODER is None:
+            return ["None"]
         return ABILITIES_ENCODER.classes_
 
     except Exception as e:
-        st.error(f"Error al cargar abilities_encoder.joblib: {e}")
+        st.error(f"Error al leer las clases del encoder: {e}")
         return ["None"]
 
 ABILITIES_OPTIONS = load_abilities()
@@ -66,51 +76,41 @@ ABILITIES_OPTIONS = load_abilities()
 
 # --- Funciones de Audio y Fondo ---
 
-# Función para autoplay de audio (comentada ya que el archivo no está disponible)
-# def autoplay_audio(file_path: str):
-#     try:
-#         with open(file_path, "rb") as f:
-#             audio_bytes = f.read()
-#         encoded = base64.b64encode(audio_bytes).decode()
-#         audio_html = f"""
-#             <audio autoplay loop>
-#                 <source src="data:audio/mp3;base64,{encoded}" type="audio/mp3">
-#             </audio>
-#         """
-#         st.markdown(audio_html, unsafe_allow_html=True)
-#     except FileNotFoundError:
-#         st.warning("Advertencia: Archivo de audio 'pokemon_theme.mp3' no encontrado.")
-# autoplay_audio("pokemon_theme.mp3")
-
-
 # FUNCIÓN MEJORADA PARA CARGAR FONDO DE MANERA SEGURA (Base64)
+def set_background(image_filename):
+    # Construimos la ruta completa a la imagen
+    image_path = os.path.join(CURRENT_DIR, image_filename)
+    
+    try:
+        with open(image_path, "rb") as img:
+            encoded_img = base64.b64encode(img.read()).decode()
 
-def set_background(image_path):
-    with open(image_path, "rb") as img:
-        encoded_img = base64.b64encode(img.read()).decode()
+        css = f"""
+        <style>
+            .stApp {{
+                background-image: url("data:image/png;base64,{encoded_img}");
+                background-size: cover !important;
+                background-repeat: no-repeat;
+                background-attachment: fixed;
+            }}
 
-    css = f"""
-    <style>
-        .stApp {{
-            background-image: url("data:image/png;base64,{encoded_img}");
-            background-size: cover !important;
-            background-repeat: no-repeat;
-            background-attachment: fixed;
-        }}
+            .st-emotion-cache-18ni7ap,
+            .st-emotion-cache-1jicfl2,
+            .st-emotion-cache-1gulkj5 {{
+                background: transparent !important;
+            }}
 
-        .st-emotion-cache-18ni7ap,
-        .st-emotion-cache-1jicfl2,
-        .st-emotion-cache-1gulkj5 {{
-            background: transparent !important;
-        }}
+            .main {{
+                padding-top: 2rem !important;
+            }}
+        </style>
+        """
+        st.markdown(css, unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.warning(f"No se encontró la imagen de fondo en: {image_path}. Verifica el nombre y que esté subida a GitHub.")
 
-        .main {{
-            padding-top: 2rem !important;
-        }}
-    </style>
-    """
-    st.markdown(css, unsafe_allow_html=True)
-
+# IMPORTANTE: Asegúrate de que el nombre del archivo en GitHub sea EXACTAMENTE este.
+# Si puedes, renómbralo a 'imagen_pokemon.png' (sin espacios ni tildes) para evitar problemas en Linux.
 set_background("Imagen del Pokémon.png")
 
 
@@ -242,6 +242,9 @@ st.markdown("""
 # 3. FUNCIONES DEL MODELO Y PREDICCIÓN
 # ==================================================
 def prepare_input_for_model(data):
+    # Verificar si los artefactos cargaron correctamente antes de procesar
+    if MODEL is None or SCALER is None or ABILITIES_ENCODER is None:
+        return None
 
     num_cols = ["hp", "atk", "def", "spa", "spd", "speed", "height", "weight"]
 
@@ -284,7 +287,7 @@ def prepare_input_for_model(data):
 
 def predict_pokemon_type(features_array):
     """Predice con el modelo de regresión logística."""
-    if MODEL is None:
+    if MODEL is None or features_array is None:
         return "Unknown"
 
     try:
@@ -337,17 +340,19 @@ def close_modal():
 def handle_predict():
     """Maneja el clic del botón Predecir."""
     if MODEL is None:
-        st.session_state.prediction_result = ("Error", "No se ha cargado el modelo.")
+        st.session_state.prediction_result = ("Error", "No se pudo cargar el modelo (revisa los archivos en GitHub).")
         return
 
     # 1. Preparar los datos del estado de la sesión
     features_array = prepare_input_for_model(st.session_state.input_data)
     
     # 2. Realizar la predicción
-    predicted_type = predict_pokemon_type(features_array)
-    
-    # 3. Almacenar el resultado para mostrarlo
-    st.session_state.prediction_result = (predicted_type, "Predicción exitosa.")
+    if features_array is not None:
+        predicted_type = predict_pokemon_type(features_array)
+        # 3. Almacenar el resultado para mostrarlo
+        st.session_state.prediction_result = (predicted_type, "Predicción exitosa.")
+    else:
+        st.session_state.prediction_result = ("Error", "Error procesando los datos de entrada.")
 
 
 def handle_restart():
@@ -421,7 +426,7 @@ if st.session_state.show_modal:
             with col_abi:
                 # Opciones de ejemplo, ajusta a tus datos
                 # Convertimos a formato capitalizado para que el usuario lo vea bonito
-                abilities_display = [a.capitalize() for a in ABILITIES_OPTIONS]
+                abilities_display = [str(a).capitalize() for a in ABILITIES_OPTIONS]
 
                 try:
                     current_index = abilities_display.index(st.session_state.input_data['abilities'].capitalize())

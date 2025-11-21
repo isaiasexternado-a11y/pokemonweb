@@ -337,6 +337,26 @@ def open_modal():
 def close_modal():
     st.session_state.show_modal = False
 
+def reproducir_audio_autoplay(file_name):
+    """Lee un archivo de audio y lo reproduce automáticamente en el navegador."""
+    audio_path = os.path.join(CURRENT_DIR, file_name)
+    
+    try:
+        with open(audio_path, "rb") as f:
+            data = f.read()
+            b64 = base64.b64encode(data).decode()
+            
+            # Inyectamos un HTML con audio autoplay y display:none para que no se vea el reproductor
+            md = f"""
+                <audio autoplay style="display:none;">
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                </audio>
+            """
+            st.markdown(md, unsafe_allow_html=True)
+            
+    except FileNotFoundError:
+        st.warning(f"No se encontró el audio: {file_name}. Asegúrate de subirlo a GitHub.")
+
 def handle_predict():
     """Maneja el clic del botón Predecir."""
     if MODEL is None:
@@ -349,10 +369,17 @@ def handle_predict():
     # 2. Realizar la predicción
     if features_array is not None:
         predicted_type = predict_pokemon_type(features_array)
+        
         # 3. Almacenar el resultado para mostrarlo
         st.session_state.prediction_result = (predicted_type, "Predicción exitosa.")
+        
+        # --- 🎵 AQUÍ AGREGAMOS LA MÚSICA 🎵 ---
+        # Esto hará que suene apenas se recargue la página con el resultado
+        reproducir_audio_autoplay("pokemon_theme.mp3")
+        
     else:
         st.session_state.prediction_result = ("Error", "Error procesando los datos de entrada.")
+
 
 
 def handle_restart():
